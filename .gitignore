@@ -1,0 +1,23 @@
+
+# Python virtual environment
+.venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Testing and tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Editor and operating system files
+.vscode/*
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
