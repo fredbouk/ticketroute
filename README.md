@@ -1,43 +1,59 @@
-# TicketRoute
+﻿# TicketRoute
 
 **AI-Assisted IT Incident Routing**
 
-TicketRoute is a Python portfolio project that aims to help first- and
-second-line IT support personnel identify the appropriate technical team for
-an incident. Its goal is to reduce time spent searching for assignment groups
-and transferring incorrectly routed incidents, helping support teams focus on
-resolving problems and assisting users.
+## Project overview
 
-This initial version is a simple Streamlit interface with an incident description
-field and an **Analyze Incident** button. Clicking the button displays a message
-explaining that routing functionality has not been implemented yet.
+TicketRoute is an AI-assisted IT incident routing application designed to help
+first- and second-line IT support personnel identify the appropriate technical
+team for an incident.
 
-Future versions may use historical resolved incidents, semantic search, and AI
-to suggest assignment groups with supporting evidence and human review.
-AI, semantic search, databases, and Azure integration are not included in this version.
+Incorrect incident assignments can lead to unnecessary investigation, repeated
+ticket transfers, and delayed resolution. TicketRoute aims to reduce this
+administrative overhead by using historical resolved incidents to support
+evidence-based routing recommendations.
 
-Use synthetic demonstration data only. Do not enter real incidents or personal
-or confidential information.
+## Key objectives
 
-## Run locally
+- Reduce the time support personnel spend identifying assignment groups.
+- Minimize unnecessary incident transfers.
+- Help technical teams focus on resolving problems rather than administrative routing work.
+- Help users receive faster assistance by directing incidents to the appropriate team earlier.
 
-Use Python 3.12. From the project folder, activate your existing virtual
-environment if you have one. In Windows PowerShell, the project's existing
-environment can be activated with:
+## Current functionality
+
+The application provides a Streamlit interface for entering incident descriptions.
+The **Analyze Incident** button validates that the description is not empty or
+whitespace-only. Valid input displays a status message explaining that the
+routing engine and AI integration have not yet been implemented.
+
+## Planned capabilities
+
+- Semantic search across historical resolved incidents.
+- AI-assisted assignment group recommendations.
+- Explanations grounded in supporting historical evidence.
+- Handling of ambiguous incidents and insufficient evidence.
+- Human review of routing recommendations.
+- Evaluation of recommendation quality.
+
+## Technology stack
+
+- Python 3.12.
+- Streamlit for the application interface.
+
+## Local development and setup
+
+From the project folder, activate your existing Python 3.12 virtual environment.
+For the existing `.venv` environment in Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-Check that the selected interpreter uses Python 3.12:
+Confirm the Python version, install the dependencies, and start the application:
 
 ```powershell
 python --version
-```
-
-Install the dependency and start the application:
-
-```powershell
 python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
@@ -45,12 +61,8 @@ python -m streamlit run app.py
 Open the local URL displayed in the terminal (usually `http://localhost:8501`).
 Press `Ctrl+C` in the terminal to stop the application.
 
-## Project files
+## Demo environment and data privacy
 
-- `app.py`: the Streamlit user interface and button response.
-- `requirements.txt`: the application's Python dependency, Streamlit.
-- `README.md`: project overview and local setup instructions.
-
-The application uses one Python file because this first version only needs a
-small user interface. Streamlit runs the script from top to bottom and reruns
-it when a user interacts with a widget. No separate backend is needed yet.
+The public demonstration will use entirely synthetic incident data. Real customer
+incidents, confidential information, and personal data should not be submitted
+to the public demo.

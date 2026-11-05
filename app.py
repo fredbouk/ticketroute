@@ -11,13 +11,16 @@ st.write(
     "Future recommendations will include supporting evidence for human review."
 )
 
-st.text_area(
+incident_description = st.text_area(
     "IT incident description",
     placeholder="Describe the incident using synthetic demonstration data only.",
 )
 
 if st.button("Analyze Incident"):
-    st.info(
-        "Incident routing functionality has not been implemented yet. "
-        "This version provides the user interface only."
-    )
+    if not incident_description.strip():
+        st.warning("Please enter an incident description.")
+    else:
+        st.info(
+            "Incident routing functionality has not been implemented yet. "
+            "This version provides the user interface only."
+        )
