@@ -8,10 +8,10 @@ TicketRoute is an AI-assisted IT incident routing application designed to help
 first- and second-line IT support personnel identify the appropriate technical
 team for an incident.
 
-Incorrect incident assignments can lead to unnecessary investigation, repeated
-ticket transfers, and delayed resolution. TicketRoute aims to reduce this
-administrative overhead by using historical resolved incidents to support
-evidence-based routing recommendations.
+Incorrect incident assignments can lead to repeated ticket transfers, increased
+administrative overhead, and delayed resolution. TicketRoute aims to streamline
+incident routing by leveraging historical resolved incidents to recommend the
+appropriate technical team, supported by relevant evidence.
 
 ## Key objectives
 
@@ -20,12 +20,11 @@ evidence-based routing recommendations.
 - Help technical teams focus on resolving problems rather than administrative routing work.
 - Help users receive faster assistance by directing incidents to the appropriate team earlier.
 
-## Current functionality
+## Development status
 
-The application provides a Streamlit interface for entering incident descriptions.
-The **Analyze Incident** button validates that the description is not empty or
-whitespace-only. Valid input displays a status message explaining that the
-routing engine and AI integration have not yet been implemented.
+TicketRoute is under active development. The initial application interface is
+implemented, with incident retrieval and routing recommendations planned for
+subsequent development stages.
 
 ## Planned capabilities
 
@@ -61,8 +60,8 @@ python -m streamlit run app.py
 Open the local URL displayed in the terminal (usually `http://localhost:8501`).
 Press `Ctrl+C` in the terminal to stop the application.
 
-## Demo environment and data privacy
+## Data and privacy
 
-The public demonstration will use entirely synthetic incident data. Real customer
-incidents, confidential information, and personal data should not be submitted
-to the public demo.
+TicketRoute currently uses synthetic incident data for development and
+demonstration purposes. The public demo is not intended for processing real
+incidents or sensitive information.
