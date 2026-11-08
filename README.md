@@ -22,9 +22,19 @@ appropriate technical team, supported by relevant evidence.
 
 ## Development status
 
-TicketRoute is under active development. The Streamlit interface, local semantic
-incident retrieval, and deterministic assignment group recommendation component
-are implemented. Recommendations are not yet connected to the interface.
+TicketRoute is under active development. The Streamlit interface connects local
+semantic incident retrieval to deterministic assignment group recommendations.
+Submit a synthetic incident description with **Analyze Incident** to retrieve
+five similar historical incidents and review the resulting suggestion or
+manual-review outcome. Expand **Supporting historical incidents** to inspect
+the evidence returned by the recommendation component.
+
+The search instance is initialized on the first valid submission and reused
+across reruns with `st.cache_resource`, avoiding repeated model loading and
+historical embedding generation. The cached resource is shared across sessions;
+incident queries and recommendation results are not cached. Loading or analysis
+failures display a generic error without exposing exception details or logging
+incident descriptions. No incident is automatically assigned or updated.
 
 ## Planned capabilities
 
@@ -131,4 +141,6 @@ evidence traceability, appropriate abstention, latency, and cost. No Foundry or
 LLM dependency is required for this baseline.
 
 Run the automated suite with `python -m pytest`. Recommendation tests use small
-synthetic DataFrames and do not initialize or download embedding models.
+synthetic DataFrames. Streamlit app tests use its built-in `AppTest` harness with
+fake retrieval and the real recommendation rules. Automated tests do not
+initialize or download embedding models.
