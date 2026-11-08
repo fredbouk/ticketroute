@@ -72,12 +72,26 @@ def test_no_eligible_matches_preserves_valid_evidence_for_review():
 
 
 @pytest.mark.parametrize("scores", [[0.4, 0.3], [0.9, 0.2], [0.9]])
-def test_weak_or_single_match_requires_manual_review(scores):
-    result = recommend_assignment_group(matches(["Cloud"] * len(scores), scores))
+def test_explicit_two_match_requirement_rejects_weak_or_single_match(scores):
+    result = recommend_assignment_group(
+        matches(["Cloud"] * len(scores), scores), min_support=2,
+    )
 
     assert result.status == "manual_review"
     assert result.assignment_group is None
     assert "Insufficient evidence" in result.reason
+
+
+@pytest.mark.parametrize("scores", [[0.5], [0.9], [0.9, 0.2]])
+def test_default_support_allows_one_eligible_match(scores):
+    incidents = matches(["Cloud"] * len(scores), scores)
+
+    result = recommend_assignment_group(incidents)
+
+    assert result.status == "recommended"
+    assert result.assignment_group == "Cloud"
+    assert result.group_scores == pytest.approx({"Cloud": scores[0]})
+    pd.testing.assert_frame_equal(result.supporting_incidents, incidents.iloc[:1])
 
 
 @pytest.mark.parametrize("incidents", [pd.DataFrame(), matches([], [])])
@@ -161,10 +175,10 @@ def test_thresholds_are_configurable_and_inclusive():
     ).assignment_group == "Cloud"
     assert recommend_assignment_group(
         incidents, min_similarity=0.7, min_weight_share=0.6
-    ).status == "manual_review"
+    ).assignment_group == "Network"
     assert recommend_assignment_group(
-        matches(["Cloud"], [0.9]), min_support=1
-    ).status == "recommended"
+        incidents, min_similarity=0.7, min_support=2, min_weight_share=0.6
+    ).status == "manual_review"
 
 
 @pytest.mark.parametrize("kwargs", [

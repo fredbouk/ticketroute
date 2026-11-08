@@ -8,7 +8,7 @@ TicketRoute is an AI-assisted IT incident routing application designed to help
 first- and second-line IT support personnel identify the appropriate technical
 team for an incident.
 
-Incorrect incident assignments can lead to repeated ticket transfers, increased
+Incorrect incident assignments usually lead to repeated ticket transfers, increased
 administrative overhead, and delayed resolution. TicketRoute aims to streamline
 incident routing by leveraging historical resolved incidents to recommend the
 appropriate technical team, supported by relevant evidence.
@@ -170,7 +170,7 @@ use different failure scenarios from the historical incidents. Blank expected
 groups mean manual review is expected. These are initial expectations for a
 learning exercise, not labels confirmed by production support teams.
 
-Keeping these cases separate from the 36 historical retrieval examples tests
+Keeping these cases separate from the 120 historical retrieval examples tests
 generalization to new reports rather than retrieval of the same reports used as
 evidence. Evaluation labels are not added to the search corpus.
 
@@ -210,6 +210,33 @@ history and thresholds. Similarity-weighted agreement also does not establish
 that an ambiguous report contains enough diagnostic information. The 100%
 accuracy comes from just two clear predictions and is weak evidence of routing
 quality; no thresholds were tuned on these results.
+
+The historical dataset was subsequently expanded from 36 to 120 entirely
+synthetic resolved incidents, retaining the original 36 and adding INC-1037
+through INC-1120. Each of the six groups now has 20 examples. The additions
+cover recurring enterprise support categories with different symptoms, scopes,
+and resolutions, including virtual desktops, identity access, VPN connectivity,
+managed clients, Azure infrastructure, collaboration tools, and business workflows.
+The evaluation dataset was left unchanged and was not inspected to select the
+new historical scenarios.
+
+With the expanded history and the same cached model, retrieval defaults,
+recommendation thresholds, and evaluation calculations, the measured results were:
+
+| Metric | Original 36 incidents | Expanded 120 incidents |
+| --- | --- | --- |
+| Recommendation coverage | 10.0% (3/30) | 26.7% (8/30) |
+| Routing accuracy on recommended clear cases | 100.0% (2/2) | 100.0% (6/6) |
+| Correct manual-review rate | 91.7% (11/12) | 83.3% (10/12) |
+
+The expanded run produced eight recommendations and 22 manual-review outcomes.
+Six clear cases received correct group recommendations, while 12 clear cases
+still went to review. Two ambiguous cases received recommendations, including
+an additional mailbox problem without enough diagnostic information. All four
+unsupported cases still went to review. More history increased coverage, but
+also made the system more willing to recommend a group for incomplete reports.
+Six correct clear predictions remain too few to establish reliable accuracy.
+No historical incidents or routing settings were adjusted in response to this run.
 
 This small dataset cannot establish production quality or calibrated confidence.
 Its wording, diagnostic detail, group balance, and chosen unsupported technologies

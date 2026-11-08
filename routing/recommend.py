@@ -20,7 +20,7 @@ def recommend_assignment_group(
     incidents: pd.DataFrame,
     *,
     min_similarity: float = 0.50,
-    min_support: int = 2,
+    min_support: int = 1,
     min_weight_share: float = 0.65,
 ) -> RecommendationResult:
     """Sum threshold-eligible similarities and abstain when evidence is unclear.
