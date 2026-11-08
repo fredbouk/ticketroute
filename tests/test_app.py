@@ -61,13 +61,17 @@ def test_recommendation_and_only_its_supporting_incidents_are_displayed(app_back
     ]
 
 
-def test_conflicting_evidence_displays_manual_review(app_backend):
+def test_conflicting_evidence_displays_ranked_suggestions_and_support(app_backend):
     _, search, _ = app_backend
     search.search.return_value.loc[2, "similarity_score"] = 1.0
     app = analyze(AppTest.from_file(APP_PATH).run())
 
-    assert app.warning[0].value == "Manual review recommended"
+    assert app.warning[0].value == "Suggested assignment groups — technician judgment required"
     assert not app.success
+    assert any(item.value == "1. Cloud Platform" for item in app.markdown)
+    assert any(item.value == "2. Network Operations" for item in app.markdown)
+    assert any("No incident has been assigned" in item.value for item in app.caption)
+    assert any("not routing probability" in item.value for item in app.caption)
     assert any("Conflicting evidence" in item.value for item in app.markdown)
     pd.testing.assert_frame_equal(
         app.dataframe[0].value,
@@ -82,9 +86,21 @@ def test_empty_evidence_displays_manual_review_without_table(app_backend):
     search.search.return_value = search.search.return_value.iloc[:0]
     app = analyze(AppTest.from_file(APP_PATH).run())
 
-    assert app.warning[0].value == "Manual review recommended"
+    assert app.warning[0].value == "Insufficient evidence — manual review required"
     assert "No valid supporting" in app.info[0].value
     assert not app.dataframe
+
+
+def test_weak_evidence_displays_no_group_suggestions(app_backend):
+    _, search, _ = app_backend
+    search.search.return_value["similarity_score"] = [0.49, 0.4, 0.2]
+    app = analyze(AppTest.from_file(APP_PATH).run())
+
+    assert app.warning[0].value == "Insufficient evidence — manual review required"
+    assert not app.success
+    assert not any("1. Cloud Platform" in item.value for item in app.markdown)
+    assert any("no matches meet min_similarity" in item.value for item in app.markdown)
+    assert len(app.dataframe[0].value) == 3
 
 
 @pytest.mark.parametrize("description", ["", " \n\t "])

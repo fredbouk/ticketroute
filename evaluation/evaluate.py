@@ -13,7 +13,7 @@ from routing.search import IncidentSearch
 DEFAULT_DATASET = Path(__file__).resolve().parent.parent / "data" / "evaluation_incidents.csv"
 OUTCOME_COLUMNS = [
     "evaluation_id", "scenario_type", "expected_assignment_group", "status",
-    "assignment_group", "correct", "reason",
+    "assignment_group", "candidate_groups", "correct", "reason",
 ]
 
 
@@ -66,6 +66,8 @@ def evaluate(
 
     Only descriptions enter retrieval. Labels are used after prediction to score
     outcomes. Errors propagate so a partial run cannot look like a complete one.
+    Candidates are never scored as correct assignments on clear cases. Suggested
+    and manual_review outcomes both require human judgment on non-clear cases.
     """
     cases = load_evaluation_incidents(path)
     if search is None and not cases.empty:
@@ -77,7 +79,7 @@ def evaluate(
             result.status == "recommended"
             and result.assignment_group == case.expected_assignment_group
             if case.scenario_type == "clear"
-            else result.status == "manual_review"
+            else result.status in {"manual_review", "suggested"}
         )
         rows.append({
             "evaluation_id": case.evaluation_id,
@@ -85,6 +87,7 @@ def evaluate(
             "expected_assignment_group": case.expected_assignment_group,
             "status": result.status,
             "assignment_group": result.assignment_group,
+            "candidate_groups": ", ".join(result.candidate_groups),
             "correct": correct,
             "reason": result.reason,
         })
@@ -111,7 +114,9 @@ def print_summary(result: EvaluationResult) -> None:
     recommendations = result.metrics["coverage"].numerator
     print(f"Evaluation incidents: {total}")
     print(f"Recommendations: {recommendations}")
-    print(f"Manual-review outcomes: {total - recommendations}")
+    candidates = int(result.outcomes["status"].eq("suggested").sum())
+    print(f"Candidate guidance outcomes: {candidates}")
+    print(f"Manual-review outcomes without suggestions: {total - recommendations - candidates}")
     labels = {
         "coverage": "Recommendation coverage",
         "routing_accuracy": "Routing accuracy on recommended clear cases",
@@ -121,6 +126,7 @@ def print_summary(result: EvaluationResult) -> None:
         metric = result.metrics[name]
         rate = f"{metric.value:.1%}" if metric.value is not None else "N/A"
         print(f"{label}: {rate} ({metric.numerator}/{metric.denominator})")
+    print("Manual-review rate includes candidate guidance requiring technician judgment.")
     table = result.outcomes.drop(columns="reason").fillna("")
     print("\nIndividual outcomes (blank expected group means manual review):")
     print(table.to_string(index=False))

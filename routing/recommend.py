@@ -1,6 +1,6 @@
 """Deterministic routing suggestions grounded in retrieved historical incidents."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isclose
 from typing import Literal
 
@@ -9,11 +9,12 @@ import pandas as pd
 
 @dataclass
 class RecommendationResult:
-    status: Literal["recommended", "manual_review"]
+    status: Literal["recommended", "suggested", "manual_review"]
     assignment_group: str | None
     reason: str
     supporting_incidents: pd.DataFrame
     group_scores: dict[str, float]
+    candidate_groups: list[str] = field(default_factory=list)
 
 
 def recommend_assignment_group(
@@ -30,7 +31,10 @@ def recommend_assignment_group(
     Incidents below ``min_similarity`` do not vote. These defaults
     are provisional heuristics, not calibrated probabilities; see README.
 
-    Recommended results include the winner's eligible incidents.
+    Recommended results include the winner's eligible incidents. If a single
+    recommendation is not justified, suggested results contain up to two groups
+    ranked by eligible similarity totals, with only their eligible incidents.
+    Suggestions require technician judgment and leave assignment_group unset.
     Manual-review results include all valid retrieved incidents so a reviewer
     can inspect weak or conflicting evidence. All original fields are preserved;
     inputs are never modified.
@@ -106,4 +110,8 @@ def recommend_assignment_group(
             winner_evidence, group_scores,
         )
 
-    return RecommendationResult("manual_review", None, reason, evidence, group_scores)
+    candidates = list(group_scores)[:2]
+    candidate_evidence = eligible.loc[eligible["assignment_group"].isin(candidates)].copy()
+    return RecommendationResult(
+        "suggested", None, reason, candidate_evidence, group_scores, candidates,
+    )

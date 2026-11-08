@@ -73,10 +73,38 @@ def test_predictions_and_metric_denominators(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "Evaluation incidents: 7" in output
     assert "Recommendations: 4" in output
-    assert "Manual-review outcomes: 3" in output
+    assert "Candidate guidance outcomes: 0" in output
+    assert "Manual-review outcomes without suggestions: 3" in output
     assert "50.0% (1/2)" in output
     assert "CASE-2" in output
     assert "Reasons for unexpected outcomes:" in output
+
+
+def test_candidates_are_reported_separately_and_never_counted_as_assignments(tmp_path, capsys):
+    path, _ = write_cases(tmp_path, [("clear", CLOUD), ("ambiguous", "")])
+
+    class ConflictingSearch:
+        def search(self, query):
+            return pd.DataFrame({
+                "incident_id": ["SYNTHETIC-1", "SYNTHETIC-2"],
+                "assignment_group": [CLOUD, NETWORK],
+                "similarity_score": [0.8, 0.7],
+            })
+
+    result = evaluate(path, search=ConflictingSearch())
+
+    assert result.outcomes["status"].tolist() == ["suggested", "suggested"]
+    assert result.outcomes["assignment_group"].isna().all()
+    assert result.outcomes["candidate_groups"].tolist() == [f"{CLOUD}, {NETWORK}"] * 2
+    assert result.outcomes["correct"].tolist() == [False, True]
+    assert result.metrics["coverage"] == Metric(0, 2)
+    assert result.metrics["routing_accuracy"] == Metric(0, 0)
+    assert result.metrics["manual_review_rate"] == Metric(1, 1)
+    print_summary(result)
+    output = capsys.readouterr().out
+    assert "Recommendations: 0" in output
+    assert "Candidate guidance outcomes: 2" in output
+    assert "Manual-review outcomes without suggestions: 0" in output
 
 
 @pytest.mark.parametrize("scenarios,predictions,expected", [

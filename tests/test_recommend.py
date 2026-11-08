@@ -24,6 +24,7 @@ def test_clear_recommendation_has_weighted_scores_and_traceable_evidence():
 
     assert result.status == "recommended"
     assert result.assignment_group == "Cloud"
+    assert result.candidate_groups == []
     assert result.group_scores == pytest.approx({"Cloud": 1.7})
     assert result.supporting_incidents["incident_id"].tolist() == ["TEST-0", "TEST-1"]
     pd.testing.assert_frame_equal(
@@ -32,17 +33,34 @@ def test_clear_recommendation_has_weighted_scores_and_traceable_evidence():
     pd.testing.assert_frame_equal(incidents, original)
 
 
-def test_conflicting_groups_require_manual_review():
+def test_conflicting_groups_return_ranked_suggestions_requiring_judgment():
     incidents = matches(
         ["Cloud", "Cloud", "Network", "Network", "Other"], [0.9, 0.8, 0.8, 0.7, 0.2]
     )
     result = recommend_assignment_group(incidents)
 
-    assert result.status == "manual_review"
+    assert result.status == "suggested"
     assert result.assignment_group is None
+    assert result.candidate_groups == ["Cloud", "Network"]
     assert "Conflicting evidence" in result.reason
     assert result.group_scores == pytest.approx({"Cloud": 1.7, "Network": 1.5})
-    pd.testing.assert_frame_equal(result.supporting_incidents, incidents)
+    pd.testing.assert_frame_equal(result.supporting_incidents, incidents.iloc[:4])
+
+
+def test_candidates_use_weighted_totals_and_exclude_third_group_and_weak_matches():
+    incidents = matches(
+        ["Network", "Cloud", "Cloud", "Other", "Weak"], [0.9, 0.5, 0.5, 0.6, 0.49],
+    )
+    original = incidents.copy(deep=True)
+
+    result = recommend_assignment_group(incidents)
+
+    assert result.status == "suggested"
+    assert result.assignment_group is None
+    assert result.candidate_groups == ["Cloud", "Network"]
+    assert result.group_scores == pytest.approx({"Cloud": 1.0, "Network": 0.9, "Other": 0.6})
+    pd.testing.assert_frame_equal(result.supporting_incidents, incidents.iloc[:3])
+    pd.testing.assert_frame_equal(incidents, original)
 
 
 def test_weak_matches_do_not_influence_totals_or_vote_share():
@@ -66,19 +84,24 @@ def test_no_eligible_matches_preserves_valid_evidence_for_review():
 
     assert result.status == "manual_review"
     assert result.assignment_group is None
+    assert result.candidate_groups == []
     assert "no matches meet min_similarity" in result.reason
     assert result.group_scores == {}
     pd.testing.assert_frame_equal(result.supporting_incidents, incidents)
 
 
 @pytest.mark.parametrize("scores", [[0.4, 0.3], [0.9, 0.2], [0.9]])
-def test_explicit_two_match_requirement_rejects_weak_or_single_match(scores):
+def test_explicit_two_match_requirement_suggests_only_when_evidence_is_eligible(scores):
     result = recommend_assignment_group(
         matches(["Cloud"] * len(scores), scores), min_support=2,
     )
 
-    assert result.status == "manual_review"
+    eligible = scores[0] >= 0.5
+    assert result.status == ("suggested" if eligible else "manual_review")
     assert result.assignment_group is None
+    assert result.candidate_groups == (["Cloud"] if eligible else [])
+    if eligible:
+        assert result.supporting_incidents["similarity_score"].ge(0.5).all()
     assert "Insufficient evidence" in result.reason
 
 
@@ -99,6 +122,7 @@ def test_empty_search_results(incidents):
     result = recommend_assignment_group(incidents)
 
     assert result.status == "manual_review"
+    assert result.candidate_groups == []
     assert result.assignment_group is None
     assert result.supporting_incidents.empty
     assert result.group_scores == {}
@@ -109,8 +133,9 @@ def test_ties_abstain_and_order_groups_deterministically():
 
     for frame in [incidents, incidents.iloc[::-1]]:
         result = recommend_assignment_group(frame)
-        assert result.status == "manual_review"
+        assert result.status == "suggested"
         assert result.assignment_group is None
+        assert result.candidate_groups == ["Cloud", "Network"]
         assert "tied" in result.reason
         assert list(result.group_scores) == ["Cloud", "Network"]
 
@@ -120,7 +145,8 @@ def test_result_structure():
 
     assert isinstance(result, RecommendationResult)
     assert {field.name for field in fields(result)} == {
-        "status", "assignment_group", "reason", "supporting_incidents", "group_scores"
+        "status", "assignment_group", "reason", "supporting_incidents", "group_scores",
+        "candidate_groups",
     }
     assert isinstance(result.reason, str) and result.reason
     assert isinstance(result.supporting_incidents, pd.DataFrame)
@@ -169,7 +195,7 @@ def test_missing_identifiers_or_groups_cannot_support_recommendation():
 def test_thresholds_are_configurable_and_inclusive():
     incidents = matches(["Cloud", "Cloud", "Network"], [0.6, 0.6, 0.8])
 
-    assert recommend_assignment_group(incidents).status == "manual_review"
+    assert recommend_assignment_group(incidents).status == "suggested"
     assert recommend_assignment_group(
         incidents, min_similarity=0.6, min_support=2, min_weight_share=0.6
     ).assignment_group == "Cloud"
@@ -178,7 +204,7 @@ def test_thresholds_are_configurable_and_inclusive():
     ).assignment_group == "Network"
     assert recommend_assignment_group(
         incidents, min_similarity=0.7, min_support=2, min_weight_share=0.6
-    ).status == "manual_review"
+    ).status == "suggested"
 
 
 @pytest.mark.parametrize("kwargs", [

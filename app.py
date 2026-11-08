@@ -13,9 +13,17 @@ def get_incident_search() -> IncidentSearch:
 def display_recommendation(result: RecommendationResult) -> None:
     if result.status == "recommended":
         st.success(f"Recommended assignment group: {result.assignment_group}")
-        st.caption("Requires human review. No incident has been assigned or updated.")
+    elif result.status == "suggested":
+        st.warning("Suggested assignment groups — technician judgment required")
+        for rank, group in enumerate(result.candidate_groups, start=1):
+            st.write(f"{rank}. {group}")
+        st.caption(
+            "Ranked by similarity-weighted historical evidence. "
+            "Equal scores are listed alphabetically."
+        )
     else:
-        st.warning("Manual review recommended")
+        st.warning("Insufficient evidence — manual review required")
+    st.caption("Requires human review. No incident has been assigned or updated.")
     st.write(result.reason)
 
     with st.expander("Supporting historical incidents"):
