@@ -34,10 +34,14 @@ Instructions:
   request human review instead of guessing a group.
 - Give a short, understandable explanation grounded in the supplied details.
 
-Respond with:
-Status: recommended or manual_review
-Assignment group: the exact historical group name, or None when human review is needed
-Explanation: one or two short sentences
+Return only one valid JSON object with exactly these fields, without Markdown or extra text:
+- "status": either "recommended" or "manual_review".
+- "assignment_group": an exact historical group name when status is "recommended";
+  otherwise null when human review is needed. Do not use the string "null".
+- "reason": a nonempty, plain-English explanation in one or two short sentences.
+
+Example of the human-review response structure:
+{{"status": "manual_review", "assignment_group": null, "reason": "There is not enough relevant evidence to recommend a team."}}
 
 <incident_data>
 {incident_data}

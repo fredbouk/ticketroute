@@ -30,7 +30,11 @@ def test_prompt_contains_new_incident_formatted_evidence_and_routing_instruction
     assert "Choose only an exact assignment_group name" in prompt
     assert "Do not invent historical incidents" in prompt
     assert "request human review instead of guessing a group" in prompt
-    assert "Explanation: one or two short sentences" in prompt
+    assert "Return only one valid JSON object" in prompt
+    assert '"status": either "recommended" or "manual_review"' in prompt
+    assert '"assignment_group": an exact historical group name' in prompt
+    assert '"reason": a nonempty, plain-English explanation in one or two short sentences' in prompt
+    assert "without Markdown or extra text" in prompt
     assert "Excluded repair instructions." not in prompt
     assert "0.87654321" not in prompt
     assert "similarity_score" not in prompt
@@ -42,7 +46,7 @@ def test_empty_history_explicitly_allows_human_review():
 
     assert "No historical incidents were supplied." in prompt
     assert "If no history is supplied" in prompt
-    assert "None when human review is needed" in prompt
+    assert "null when human review is needed" in prompt
     assert "Historical assignment group:" not in prompt
 
 
