@@ -144,3 +144,80 @@ Run the automated suite with `python -m pytest`. Recommendation tests use small
 synthetic DataFrames. Streamlit app tests use its built-in `AppTest` harness with
 fake retrieval and the real recommendation rules. Automated tests do not
 initialize or download embedding models.
+
+## Initial routing evaluation
+
+With the virtual environment activated, run:
+
+```powershell
+python -m evaluation.evaluate
+```
+
+The runner reuses `IncidentSearch` (default top five matches) and
+`recommend_assignment_group` with unchanged thresholds. It loads the local
+embedding model once; the first run may download the model if it is not cached.
+Only incident descriptions enter retrieval, never scenario types or expected
+groups. The output includes counts, rates with numerator/denominator pairs,
+individual predictions, and reasons for unexpected outcomes. An undefined rate
+is displayed as `N/A (0/0)`. Retrieval errors stop the run instead of being
+counted as manual-review decisions.
+
+`data/evaluation_incidents.csv` contains 30 entirely synthetic cases: 18 clear
+cases (three per existing group), eight ambiguous cases missing diagnostic
+details, and four unsupported cases involving laboratory instruments, industrial
+safety controls, mainframe batch processing, and FPGA logic. The clear cases
+use different failure scenarios from the historical incidents. Blank expected
+groups mean manual review is expected. These are initial expectations for a
+learning exercise, not labels confirmed by production support teams.
+
+Keeping these cases separate from the 36 historical retrieval examples tests
+generalization to new reports rather than retrieval of the same reports used as
+evidence. Evaluation labels are not added to the search corpus.
+
+| Metric | Numerator | Denominator |
+| --- | --- | --- |
+| Recommendation coverage | Cases receiving a group recommendation | All evaluation cases |
+| Routing accuracy on recommended clear cases | Correct group recommendations on clear cases | Clear cases receiving a recommendation |
+| Correct manual-review rate | Ambiguous or unsupported cases sent to manual review | All ambiguous and unsupported cases |
+
+Accuracy asks whether the group is right when a clear case receives a
+recommendation. Coverage asks how often the system recommends any group.
+An abstention on a clear case reduces coverage but is excluded from routing
+accuracy; a recommendation on an ambiguous or unsupported case counts toward
+coverage but fails the manual-review expectation. Read all three metrics
+together and inspect the individual outcomes to avoid hiding these tradeoffs.
+
+Initial measured run on November 8, 2026, using the cached
+`sentence-transformers/all-MiniLM-L6-v2` model and unchanged defaults:
+
+| Result | Measured value |
+| --- | --- |
+| Evaluated cases | 30 |
+| Recommendations / manual-review outcomes | 3 / 27 |
+| Recommendation coverage | 10.0% (3/30) |
+| Routing accuracy on recommended clear cases | 100.0% (2/2) |
+| Correct manual-review rate | 91.7% (11/12) |
+
+The two recommended clear cases were EVAL-002 (Azure compute quota) and EVAL-005
+(directory account lockout). The remaining 16 clear cases were sent to review:
+15 had no retrieved match at similarity 0.50 or higher, and EVAL-013 had only one
+eligible match instead of the required two. EVAL-020, an ambiguous shared-site
+editing problem, received a Collaboration Services recommendation despite missing
+information needed to distinguish site restrictions from identity membership.
+Seven of eight ambiguous cases and all four unsupported cases went to review.
+These results show limited coverage of new failure scenarios by the current
+history and thresholds. Similarity-weighted agreement also does not establish
+that an ambiguous report contains enough diagnostic information. The 100%
+accuracy comes from just two clear predictions and is weak evidence of routing
+quality; no thresholds were tuned on these results.
+
+This small dataset cannot establish production quality or calibrated confidence.
+Its wording, diagnostic detail, group balance, and chosen unsupported technologies
+affect the results. Ambiguous cases can resemble well-supported historical cases
+without supplying enough information for a justified route. Review expectations
+with domain experts and eventually evaluate on representative, appropriately
+handled operational data. If these cases are used to tune thresholds, retain a
+new untouched test set for the final assessment.
+
+`tests/test_evaluate.py` uses fake retrieval with the real recommendation rules,
+so metric and outcome tests never download the embedding model.
