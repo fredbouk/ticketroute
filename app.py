@@ -1,5 +1,10 @@
+import os
+
+import pandas as pd
 import streamlit as st
 
+from routing.llm import LLMRoutingResult
+from routing.rag import recommend_with_rag
 from routing.recommend import RecommendationResult, recommend_assignment_group
 from routing.search import IncidentSearch
 
@@ -108,7 +113,7 @@ PAGE_STYLE = """
 """
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_incident_search() -> IncidentSearch:
     """Reuse the local model and historical embeddings across Streamlit reruns."""
     return IncidentSearch()
@@ -121,7 +126,10 @@ def populate_example_incident() -> None:
         st.session_state["incident_description"] = EXAMPLE_INCIDENTS[selected]
 
 
-def display_recommendation(result: RecommendationResult) -> None:
+def display_recommendation(
+    result: RecommendationResult | LLMRoutingResult,
+    supporting_incidents: pd.DataFrame | None = None,
+) -> None:
     with st.container(border=True, key="routing_result"):
         if result.status == "recommended":
             st.caption("Recommended assignment group")
@@ -133,20 +141,26 @@ def display_recommendation(result: RecommendationResult) -> None:
         else:
             st.caption("Routing result")
             st.subheader("Manual review needed")
-            st.write(
-                "No closely related incidents were found. Please review this incident "
-                "and determine the appropriate assignment group."
-            )
+            if isinstance(result, RecommendationResult):
+                st.write(
+                    "No closely related incidents were found. Please review this incident "
+                    "and determine the appropriate assignment group."
+                )
+
+        if isinstance(result, LLMRoutingResult):
+            st.write(result.reason)
 
     if result.status == "manual_review":
         return
 
-    count = len(result.supporting_incidents)
-    st.subheader(f"Supporting historical incidents ({count})")
-    if result.supporting_incidents.empty:
-        st.caption("No supporting historical incidents are available.")
+    if supporting_incidents is None:
+        supporting_incidents = result.supporting_incidents
+    count = len(supporting_incidents)
+    st.subheader(f"Similar historical incidents ({count})")
+    if supporting_incidents.empty:
+        st.caption("No similar historical incidents are available.")
     else:
-        for _, incident in result.supporting_incidents.iterrows():
+        for _, incident in supporting_incidents.iterrows():
             label = (
                 f"{incident['incident_id']} · {incident['short_description']}  \n"
                 f"Historical assignment group: **{incident['assignment_group']}**"
@@ -201,26 +215,39 @@ def display_page() -> None:
         st.warning("Please enter an incident description.")
         return
 
-    try:
-        with st.spinner("Preparing incident search. The first request may take a little longer..."):
+    with st.spinner("Analyzing incident..."):
+        try:
             search = get_incident_search()
-    except Exception:
-        # Keep model errors, paths, and potentially sensitive details out of the UI.
-        st.error(
-            "Incident search could not be loaded. Please check that the historical "
-            "dataset and local embedding model are available, then try again."
-        )
-        return
+        except Exception:
+            # Keep model errors, paths, and potentially sensitive details out of the UI.
+            st.error(
+                "Incident search could not be loaded. Please check that the historical "
+                "dataset and local embedding model are available, then try again."
+            )
+            return
 
-    try:
-        with st.spinner("Finding relevant incidents and routing guidance..."):
+        try:
             matches = search.search(incident_description.strip(), top_k=5)
-            result = recommend_assignment_group(matches)
-    except Exception:
-        st.error("The incident could not be analyzed. Please try again or request manual review.")
-        return
+            names = ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT")
+            result = None
+            if all(os.environ.get(name, "").strip() for name in names):
+                try:
+                    # The configured Foundry deployment hosts GPT-4.1 mini.
+                    # Reuse the cached model; RAG validates the response against its retrieval.
+                    result = recommend_with_rag(incident_description.strip(), search=search)
+                except Exception:
+                    # Do not expose SDK errors, credentials, or invalid response content.
+                    pass
+            if result is None:
+                result = recommend_assignment_group(matches)
+                st.caption("Local routing used: AI routing is unavailable.")
+        except Exception:
+            st.error("The incident could not be analyzed. Please try again or request manual review.")
+            return
 
-    display_recommendation(result)
+    display_recommendation(
+        result, matches if isinstance(result, LLMRoutingResult) else None,
+    )
 
 
 def main() -> None:

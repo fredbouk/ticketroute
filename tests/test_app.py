@@ -1,6 +1,9 @@
 from pathlib import Path
-from unittest.mock import Mock
+import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock
 
+from openai import OpenAIError
 import pandas as pd
 import pytest
 import streamlit as st
@@ -16,6 +19,11 @@ APP_PATH = Path(__file__).resolve().parents[1] / "app.py"
 def app_backend(monkeypatch):
     """Use the real decision rules with fake retrieval; never load a model."""
     st.cache_resource.clear()
+    # Baseline UI tests exercise missing-configuration fallback, regardless of
+    # the developer's environment. Any accidental SDK use fails locally.
+    for name in ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("routing.llm.OpenAI", Mock(side_effect=AssertionError("No real API calls")))
     incidents = pd.DataFrame({
         "incident_id": ["TEST-1", "TEST-2", "TEST-3"],
         "short_description": ["Desktop unavailable", "Session launch failed", "VPN failed"],
@@ -28,6 +36,8 @@ def app_backend(monkeypatch):
     search.search.return_value = incidents
     constructor = Mock(return_value=search)
     recommend = Mock(wraps=recommend_assignment_group)
+    # Load RAG before replacing the search class used in its runtime annotations.
+    monkeypatch.setattr("routing.rag.IncidentSearch", Mock(side_effect=AssertionError("No model loading")))
     monkeypatch.setattr("routing.search.IncidentSearch", constructor)
     monkeypatch.setattr("routing.recommend.recommend_assignment_group", recommend)
     yield constructor, search, recommend
@@ -52,6 +62,7 @@ def test_recommendation_and_only_its_supporting_incidents_are_displayed(app_back
     assert not app.success
     assert not app.warning
     assert any(item.value == "Cloud Platform" for item in app.subheader)
+    assert any(item.value == "Similar historical incidents (2)" for item in app.subheader)
     assert not any("Confirm the team before routing" in item.value for item in app.caption)
     assert not any(item.label == "Why this result?" for item in app.expander)
     constructor.assert_called_once_with()
@@ -226,3 +237,149 @@ def test_backend_errors_are_handled_without_exposing_details(app_backend, stage)
         recommend.assert_not_called()
     else:
         assert "could not be analyzed" in app.error[0].value
+
+
+@pytest.fixture
+def rag_client(app_backend, monkeypatch):
+    """Keep real prompt building and response validation; replace only the SDK."""
+    for name, value in {
+        "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com",
+        "AZURE_OPENAI_API_KEY": "private-test-key",
+        "AZURE_OPENAI_DEPLOYMENT": "gpt-4.1-mini",
+    }.items():
+        monkeypatch.setenv(name, value)
+    constructor = MagicMock()
+    client = constructor.return_value.__enter__.return_value
+    client.chat.completions.create.return_value = SimpleNamespace(choices=[
+        SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "status": "recommended", "assignment_group": "Cloud Platform",
+            "reason": "The retrieved incidents describe hosted desktop failures.",
+        }))),
+    ])
+    monkeypatch.setattr("routing.llm.OpenAI", constructor)
+    return client
+
+
+def test_rag_recommendation_explanation_and_evidence_use_existing_layout(app_backend, rag_client):
+    constructor, search, baseline = app_backend
+    app = AppTest.from_file(APP_PATH).run()
+    rag_client.chat.completions.create.assert_not_called()
+
+    analyze(app, "  Synthetic desktop session fails to launch.  ")
+
+    assert any(item.value == "Cloud Platform" for item in app.subheader)
+    assert any(item.value == "The retrieved incidents describe hosted desktop failures."
+               for item in app.markdown)
+    assert len(app.expander) == 3
+    assert any(item.value == "Similar historical incidents (3)" for item in app.subheader)
+    assert not any("Supporting historical incidents" in item.value for item in app.subheader)
+    # Keep every retrieved incident, including groups different from the RAG recommendation.
+    assert [item.label.split(" ")[0] for item in app.expander] == ["TEST-1", "TEST-2", "TEST-3"]
+    assert "Historical assignment group: **Network Operations**" in app.expander[2].label
+    assert any(item.value == "Resolved synthetic issue." for item in app.markdown)
+    assert not any("Local routing used" in item.value for item in app.caption)
+    assert not app.error
+    baseline.assert_not_called()
+    constructor.assert_called_once_with()
+    assert all(call.args == ("Synthetic desktop session fails to launch.",)
+               and call.kwargs == {"top_k": 5} for call in search.search.call_args_list)
+    rag_client.chat.completions.create.assert_called_once()
+    request = rag_client.chat.completions.create.call_args.kwargs
+    assert request["model"] == "gpt-4.1-mini"
+    assert "Synthetic desktop session fails to launch." in request["messages"][0]["content"]
+    assert not any('"status"' in item.value or "private-test-key" in item.value
+                   for item in app.markdown)
+
+
+def test_rag_manual_review_keeps_explanation_and_does_not_fall_back(app_backend, rag_client):
+    rag_client.chat.completions.create.return_value.choices[0].message.content = json.dumps({
+        "status": "manual_review", "assignment_group": None,
+        "reason": "Please confirm whether the failure affects the workstation or the remote session.",
+    })
+
+    app = analyze(AppTest.from_file(APP_PATH).run())
+
+    assert any(item.value == "Manual review needed" for item in app.subheader)
+    assert any("Please confirm whether" in item.value for item in app.markdown)
+    assert not any(item.value == "Cloud Platform" for item in app.subheader)
+    assert not any("No closely related incidents were found" in item.value for item in app.markdown)
+    assert not app.expander
+    assert not any("Similar historical incidents" in item.value for item in app.subheader)
+    assert not any("similar historical incidents" in item.value for item in app.caption)
+    assert not any("Local routing used" in item.value for item in app.caption)
+    app_backend[2].assert_not_called()
+
+
+def test_rag_without_matches_hides_similar_incidents_section(app_backend, rag_client):
+    search = app_backend[1]
+    search.search.return_value = search.search.return_value.iloc[:0]
+
+    app = analyze(AppTest.from_file(APP_PATH).run())
+
+    assert any(item.value == "Manual review needed" for item in app.subheader)
+    assert any(item.value == (
+        "No historical incidents were found. A technician needs to review this incident."
+    ) for item in app.markdown)
+    assert not any("Similar historical incidents" in item.value for item in app.subheader)
+    assert not any("similar historical incidents" in item.value for item in app.caption)
+    assert not app.expander
+    rag_client.chat.completions.create.assert_not_called()
+    app_backend[2].assert_not_called()
+
+
+@pytest.mark.parametrize("missing", [
+    "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT",
+])
+def test_missing_azure_configuration_labels_local_fallback(app_backend, rag_client, monkeypatch, missing):
+    monkeypatch.setenv(missing, "   ")
+
+    app = analyze(AppTest.from_file(APP_PATH).run())
+
+    assert any(item.value == "Local routing used: AI routing is unavailable." for item in app.caption)
+    assert any(item.value == "Cloud Platform" for item in app.subheader)
+    assert len(app.expander) == 2
+    rag_client.chat.completions.create.assert_not_called()
+    app_backend[2].assert_called_once()
+
+
+@pytest.mark.parametrize("failure", ["api", "invalid_json", "unsupported_group", "unexpected"])
+def test_rag_failures_fall_back_safely(app_backend, rag_client, failure):
+    response = rag_client.chat.completions.create.return_value.choices[0].message
+    if failure == "api":
+        rag_client.chat.completions.create.side_effect = OpenAIError("private-test-key internal URL")
+    elif failure == "invalid_json":
+        response.content = "private-test-key invalid JSON response"
+    elif failure == "unsupported_group":
+        response.content = json.dumps({
+            "status": "recommended", "assignment_group": "Unrecognized private-test-key team",
+            "reason": "private-test-key",
+        })
+    else:
+        rag_client.chat.completions.create.side_effect = RuntimeError("private-test-key internal path")
+
+    app = analyze(AppTest.from_file(APP_PATH).run())
+
+    assert any("Local routing used" in item.value for item in app.caption)
+    assert any(item.value == "Cloud Platform" for item in app.subheader)
+    assert len(app.expander) == 2
+    assert not app.error
+    app_backend[2].assert_called_once()
+    visible = " ".join(item.value for elements in
+                       (app.caption, app.markdown, app.subheader, app.error) for item in elements)
+    for private_text in ("private-test-key", "internal URL", "internal path", '"status"', "Traceback"):
+        assert private_text not in visible
+
+
+def test_rag_submissions_reuse_cached_search_without_background_requests(app_backend, rag_client):
+    app = AppTest.from_file(APP_PATH).run()
+    app.selectbox[0].select("Cloud Platform").run()
+    rag_client.chat.completions.create.assert_not_called()
+    app_backend[0].assert_not_called()
+
+    analyze(app)
+    analyze(app, "Another synthetic incident.")
+    app.run()
+
+    app_backend[0].assert_called_once_with()
+    app_backend[2].assert_not_called()
+    assert rag_client.chat.completions.create.call_count == 2
