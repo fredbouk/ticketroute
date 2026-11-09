@@ -70,11 +70,18 @@ PAGE_STYLE = """
         border-radius: 0.75rem;
         padding: 1rem 1.25rem;
     }
-    .st-key-incident_input [data-testid="stCaptionContainer"] p { font-size: 0.95rem; }
+    .st-key-incident_input [data-testid="stCaptionContainer"] p {
+        font-size: 1rem;
+        color: #526176;
+    }
     .st-key-example_selector [data-testid="stCaptionContainer"] p { font-size: 15px; }
     .st-key-example_selector [data-baseweb="select"] {
         font-size: 15px;
         color: #526176;
+    }
+    .st-key-example_selector [data-baseweb="select"] div,
+    .st-key-example_selector [data-baseweb="select"] input {
+        font-size: 15px;
     }
     [data-testid="stExpander"] summary { align-items: flex-start; }
     [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] {
@@ -92,6 +99,7 @@ PAGE_STYLE = """
         padding: 0.55rem 1.3rem;
         font-weight: 600;
     }
+    .st-key-find_assignment_group button p { font-size: 16px; }
     .st-key-routing_result {
         background: #F8FAFE;
         border-left: 3px solid #315E9B;
