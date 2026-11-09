@@ -54,12 +54,15 @@ def _parse_routing_response(text: str, allowed_groups: set[str]) -> LLMRoutingRe
     return LLMRoutingResult(status, group, reason.strip())
 
 
-def get_routing_response(prompt: str, incidents: pd.DataFrame) -> LLMRoutingResult:
+def get_routing_response(
+    prompt: str, incidents: pd.DataFrame, *, max_retries: int | None = None,
+) -> LLMRoutingResult:
     """Return a validated result; propagate SDK errors to the caller.
 
     Pass the same historical rows used by build_routing_prompt(). Group names
     are checked against those rows, never extracted from model output or the
     technician's text. A valid result does not automatically assign an incident.
+    Set max_retries=0 for callers with a strict request budget; None keeps SDK defaults.
     """
     if not prompt.strip():
         raise ValueError("Routing prompt must not be blank.")
@@ -81,7 +84,8 @@ def get_routing_response(prompt: str, incidents: pd.DataFrame) -> LLMRoutingResu
 
     endpoint = config["AZURE_OPENAI_ENDPOINT"].rstrip("/")
     base_url = endpoint + "/" if endpoint.endswith("/openai/v1") else endpoint + "/openai/v1/"
-    with OpenAI(api_key=config["AZURE_OPENAI_API_KEY"], base_url=base_url) as client:
+    retry_options = {} if max_retries is None else {"max_retries": max_retries}
+    with OpenAI(api_key=config["AZURE_OPENAI_API_KEY"], base_url=base_url, **retry_options) as client:
         response = client.chat.completions.create(
             model=config["AZURE_OPENAI_DEPLOYMENT"],
             messages=[{"role": "user", "content": prompt}],
