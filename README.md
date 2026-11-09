@@ -70,6 +70,61 @@ python -m streamlit run app.py
 Open the local URL displayed in the terminal (usually `http://localhost:8501`).
 Press `Ctrl+C` in the terminal to stop the application.
 
+## Docker
+
+With Docker running in Linux container mode, build and run from the project root:
+
+```powershell
+docker build -t ticketroute:local .
+docker run --rm --name ticketroute -p 8501:8501 ticketroute:local
+```
+
+Open `http://localhost:8501`. Stop with `Ctrl+C`. The image uses Python 3.12,
+runs as a non-root user, and includes the application, current Streamlit theme,
+and synthetic CSV datasets. Its health check uses `/_stcore/health` on port 8501.
+For a future Azure Container Apps deployment, set the ingress target port to
+**8501**; no Azure resources are created by these commands.
+
+The build installs `requirements.txt` with CPU-only PyTorch and downloads the
+existing `sentence-transformers/all-MiniLM-L6-v2` model into the image. Building
+requires internet access and takes longer; PyTorch and the model also make the
+image larger. Runtime model loading is offline, so new replicas and the first
+search do not depend on Hugging Face availability. The build also precomputes
+historical embeddings, so the first search loads the model and saved vectors
+without embedding the history again. Rebuild the image to refresh dependencies,
+data, or the bundled model.
+
+For Azure AI routing, set `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, and
+`AZURE_OPENAI_DEPLOYMENT` in your host environment, then forward them at runtime:
+
+```powershell
+docker run --rm --name ticketroute -p 8501:8501 --env AZURE_OPENAI_ENDPOINT --env AZURE_OPENAI_API_KEY --env AZURE_OPENAI_DEPLOYMENT ticketroute:local
+```
+
+The existing app reads these variables at runtime and uses local routing when
+Azure AI configuration is absent or unavailable. For Azure Container Apps, supply
+the key through a secret-backed environment variable. Never put credentials in
+the Dockerfile or build arguments. The build context allows only the listed
+runtime files, excluding local secrets, virtual environments, tests, and caches.
+
+## Historical embedding cache
+
+`IncidentSearch` saves historical vectors and their fingerprint together in
+`.cache/historical_embeddings.npz`, a local NumPy archive loaded without pickle.
+New Python processes reuse these vectors. The SHA-256 fingerprint covers the
+loaded historical data (including row order), model name, resolved Hugging Face
+model commit, and sentence-transformers/transformers versions. A data or model
+change invalidates the cache. Query embeddings are still computed for each search.
+
+Missing, outdated, or corrupt caches are regenerated automatically. Writes use
+an atomic file replacement; an unwritable cache falls back to in-memory embeddings.
+The cache is ignored by Git and excluded from the Docker build context; Docker
+generates its own copy using the bundled model and data. Locally, the first run
+still needs the model available or internet access to download it. Injected custom
+models bypass disk caching because their identity cannot be verified; models
+without a resolved commit also bypass it. Pass `cache_path=None` to disable disk
+caching, or a `pathlib.Path` to use another cache location.
+
 ## Data and privacy
 
 TicketRoute currently uses synthetic incident data for development and

@@ -1,0 +1,14 @@
+# Allow only runtime inputs into the build context. Everything else stays out,
+# including .venv, Git files, tests, caches, .env files, secrets, and dev tools.
+**
+!Dockerfile
+!.dockerignore
+!requirements.txt
+!app.py
+!routing/
+!routing/*.py
+!data/
+!data/incidents.csv
+!data/evaluation_incidents.csv
+!.streamlit/
+!.streamlit/config.toml

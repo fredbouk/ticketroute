@@ -9,6 +9,7 @@ __pycache__/
 # Testing and tooling caches
 .pytest_cache/
 .ruff_cache/
+.cache/
 
 # Environment variables and secrets
 .env
