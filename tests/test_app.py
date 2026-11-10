@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
@@ -44,7 +45,10 @@ def app_backend(monkeypatch):
     st.cache_resource.clear()
 
 
-def analyze(app, description="Synthetic desktop session fails to launch."):
+def analyze(app, description="Synthetic desktop session fails to launch.", *, elapse_cooldown=True):
+    if elapse_cooldown:
+        # Simulate elapsed time for repeated submissions without slowing tests.
+        app.session_state["last_analysis_at"] = monotonic() - 3
     app.text_area[0].input(description)
     next(button for button in app.button if button.label == "Find assignment group").click().run()
     assert not app.exception
@@ -324,6 +328,7 @@ def test_rag_without_matches_hides_similar_incidents_section(app_backend, rag_cl
     assert not any("similar historical incidents" in item.value for item in app.caption)
     assert not app.expander
     rag_client.chat.completions.create.assert_not_called()
+    assert app.session_state["llm_request_count"] == 0
     app_backend[2].assert_not_called()
 
 
@@ -339,6 +344,7 @@ def test_missing_azure_configuration_labels_local_fallback(app_backend, rag_clie
     assert any(item.value == "Cloud Platform" for item in app.subheader)
     assert len(app.expander) == 2
     rag_client.chat.completions.create.assert_not_called()
+    assert app.session_state["llm_request_count"] == 0
     app_backend[2].assert_called_once()
 
 
@@ -363,6 +369,7 @@ def test_rag_failures_fall_back_safely(app_backend, rag_client, failure):
     assert any(item.value == "Cloud Platform" for item in app.subheader)
     assert len(app.expander) == 2
     assert not app.error
+    assert app.session_state["llm_request_count"] == 1
     app_backend[2].assert_called_once()
     visible = " ".join(item.value for elements in
                        (app.caption, app.markdown, app.subheader, app.error) for item in elements)
@@ -383,3 +390,99 @@ def test_rag_submissions_reuse_cached_search_without_background_requests(app_bac
     app_backend[0].assert_called_once_with()
     app_backend[2].assert_not_called()
     assert rag_client.chat.completions.create.call_count == 2
+
+
+def test_session_allows_30_llm_requests_then_keeps_using_local_routing(app_backend, rag_client):
+    app = AppTest.from_file(APP_PATH).run()
+    for count in range(1, 31):
+        analyze(app)
+        assert app.session_state["llm_request_count"] == count
+        assert rag_client.chat.completions.create.call_count == count
+        app_backend[2].assert_not_called()
+        if count < 30:
+            assert not app.info
+
+    assert "AI request limit reached" in app.info[0].value
+    for _ in range(2):
+        analyze(app)
+        assert "AI request limit reached" in app.info[0].value
+        assert "using local routing" in app.info[0].value
+        assert any(item.value == "Cloud Platform" for item in app.subheader)
+        assert len(app.expander) == 2
+    assert app_backend[2].call_count == 2
+    assert rag_client.chat.completions.create.call_count == 30
+    assert app.session_state["llm_request_count"] == 30
+
+    app.run()
+    assert "AI request limit reached" in app.info[0].value
+    # A new browser session has its own allowance and cooldown.
+    other = analyze(AppTest.from_file(APP_PATH).run(), elapse_cooldown=False)
+    assert other.session_state["llm_request_count"] == 1
+    assert not other.info
+
+
+def test_failed_final_attempt_exhausts_allowance(app_backend, rag_client):
+    app = AppTest.from_file(APP_PATH).run()
+    app.session_state["llm_request_count"] = 29
+    rag_client.chat.completions.create.side_effect = OpenAIError("private-test-key")
+
+    analyze(app)
+    assert app.session_state["llm_request_count"] == 30
+    assert "AI request limit reached" in app.info[0].value
+    analyze(app)
+    rag_client.chat.completions.create.assert_called_once()
+    assert app_backend[2].call_count == 2
+    assert "AI request limit reached" in app.info[0].value
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_cooldown_blocks_backend_and_allows_request_at_three_seconds(
+    app_backend, rag_client, monkeypatch, configured,
+):
+    if not configured:
+        monkeypatch.delenv("AZURE_OPENAI_API_KEY")
+    clock = Mock(return_value=100.0)
+    monkeypatch.setattr("time.monotonic", clock)
+    app = analyze(AppTest.from_file(APP_PATH).run(), elapse_cooldown=False)
+    search_calls = app_backend[1].search.call_count
+    llm_calls = rag_client.chat.completions.create.call_count
+
+    clock.return_value = 102.999
+    analyze(app, elapse_cooldown=False)
+    assert "Please wait 3 seconds" in app.info[0].value
+    assert app_backend[1].search.call_count == search_calls
+    assert rag_client.chat.completions.create.call_count == llm_calls
+    assert app.session_state["llm_request_count"] == int(configured)
+    assert app.session_state["last_analysis_at"] == 100.0
+
+    clock.return_value = 103.0
+    analyze(app, elapse_cooldown=False)
+    assert not app.info
+    assert app_backend[1].search.call_count > search_calls
+    assert app.session_state["llm_request_count"] == 2 * int(configured)
+
+
+@pytest.mark.parametrize("description", ["x" * 5_001, " " + "x" * 5_000, " " * 5_001])
+def test_overlong_input_is_rejected_before_backend(app_backend, rag_client, description):
+    app = analyze(AppTest.from_file(APP_PATH).run(), description, elapse_cooldown=False)
+    assert app.warning[0].value == (
+        "Please shorten the incident description to 5,000 characters or fewer."
+    )
+    app_backend[0].assert_not_called()
+    app_backend[1].search.assert_not_called()
+    rag_client.chat.completions.create.assert_not_called()
+    assert app.session_state["llm_request_count"] == 0
+    assert "last_analysis_at" not in app.session_state
+
+
+def test_exactly_5000_characters_are_allowed_and_sdk_retries_are_disabled(
+    app_backend, rag_client,
+):
+    import routing.llm
+
+    sdk_constructor = routing.llm.OpenAI
+    app = analyze(AppTest.from_file(APP_PATH).run(), "x" * 5_000)
+    assert not app.warning
+    assert app.session_state["llm_request_count"] == 1
+    rag_client.chat.completions.create.assert_called_once()
+    assert sdk_constructor.call_args.kwargs["max_retries"] == 0

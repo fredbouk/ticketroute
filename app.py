@@ -1,15 +1,24 @@
 import os
+from time import monotonic
 
 import pandas as pd
 import streamlit as st
 
-from routing.llm import LLMRoutingResult
+from routing.llm import LLMRoutingResult, get_routing_response
 from routing.rag import recommend_with_rag
 from routing.recommend import RecommendationResult, recommend_assignment_group
 from routing.search import IncidentSearch
 
 
 EXAMPLE_PLACEHOLDER = "Choose an example..."
+AI_REQUEST_LIMIT = 30
+ANALYSIS_COOLDOWN_SECONDS = 3
+MAX_DESCRIPTION_CHARACTERS = 5_000
+AI_LIMIT_MESSAGE = (
+    "**AI request limit reached**\n\n"
+    "You've reached the AI analysis limit for this session. TicketRoute will continue "
+    "providing recommendations using local routing."
+)
 # Entirely fictional examples, with no real company or personal information.
 EXAMPLE_INCIDENTS = {
     "Cloud Platform": (
@@ -186,6 +195,7 @@ def display_recommendation(
 
 
 def display_page() -> None:
+    st.session_state.setdefault("llm_request_count", 0)
     with st.container(key="app_header", gap="small"):
         st.caption("IT SERVICE DESK / ASSIGNMENT GUIDANCE")
         st.title(":material/alt_route: TicketRoute")
@@ -217,11 +227,26 @@ def display_page() -> None:
             "Find assignment group", type="primary", width=280, key="find_assignment_group",
         )
 
+    limit_notice = st.empty()
+    limit_reached = st.session_state["llm_request_count"] >= AI_REQUEST_LIMIT
+    if limit_reached:
+        limit_notice.info(AI_LIMIT_MESSAGE)
+
     if not submitted:
+        return
+    if len(incident_description) > MAX_DESCRIPTION_CHARACTERS:
+        st.warning("Please shorten the incident description to 5,000 characters or fewer.")
         return
     if not incident_description.strip():
         st.warning("Please enter an incident description.")
         return
+
+    now = monotonic()
+    last_analysis = st.session_state.get("last_analysis_at")
+    if last_analysis is not None and now - last_analysis < ANALYSIS_COOLDOWN_SECONDS:
+        st.info("Please wait 3 seconds between analyses, then try again.")
+        return
+    st.session_state["last_analysis_at"] = now
 
     with st.spinner("Analyzing incident..."):
         try:
@@ -238,17 +263,28 @@ def display_page() -> None:
             matches = search.search(incident_description.strip(), top_k=5)
             names = ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT")
             result = None
-            if all(os.environ.get(name, "").strip() for name in names):
+            if not limit_reached and all(os.environ.get(name, "").strip() for name in names):
                 try:
+                    def session_llm_client(prompt: str, incidents: pd.DataFrame) -> LLMRoutingResult:
+                        # Charge before calling so failed attempts count too. RAG can
+                        # return manual review without invoking this callback.
+                        st.session_state["llm_request_count"] += 1
+                        return get_routing_response(prompt, incidents, max_retries=0)
+
                     # The configured Foundry deployment hosts GPT-4.1 mini.
                     # Reuse the cached model; RAG validates the response against its retrieval.
-                    result = recommend_with_rag(incident_description.strip(), search=search)
+                    result = recommend_with_rag(
+                        incident_description.strip(), search=search, llm_client=session_llm_client,
+                    )
                 except Exception:
                     # Do not expose SDK errors, credentials, or invalid response content.
                     pass
             if result is None:
                 result = recommend_assignment_group(matches)
-                st.caption("Local routing used: AI routing is unavailable.")
+                if not limit_reached:
+                    st.caption("Local routing used: AI routing is unavailable.")
+            if st.session_state["llm_request_count"] >= AI_REQUEST_LIMIT:
+                limit_notice.info(AI_LIMIT_MESSAGE)
         except Exception:
             st.error("The incident could not be analyzed. Please try again or request manual review.")
             return
