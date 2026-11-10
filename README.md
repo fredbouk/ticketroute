@@ -65,7 +65,8 @@ flowchart TD
   AI routing remains disabled until its Azure configuration is enabled.
 
 The release path is Docker image build, push to ACR, then update Container Apps.
-**GitHub Actions CI/CD is planned, not implemented.**
+**GitHub Actions CI** runs tests and builds the Docker image on pushes and pull
+requests to `main`. Automated publishing and deployment remain planned.
 
 ## Technology stack
 
