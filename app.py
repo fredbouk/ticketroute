@@ -295,7 +295,9 @@ def display_page() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="TicketRoute | Incident Routing", layout="wide")
+    st.set_page_config(
+        page_title="TicketRoute | Incident Routing", page_icon=":material/alt_route:", layout="wide",
+    )
     st.markdown(PAGE_STYLE, unsafe_allow_html=True)
     with st.container(horizontal_alignment="center"):
         with st.container(width=1200, gap="medium"):
