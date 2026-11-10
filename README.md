@@ -64,9 +64,14 @@ flowchart TD
 - **Microsoft Foundry** provides the optional GPT-4.1 mini deployment. Public-demo
   AI routing remains disabled until its Azure configuration is enabled.
 
-The release path is Docker image build, push to ACR, then update Container Apps.
-**GitHub Actions CI** runs tests and builds the Docker image on pushes and pull
-requests to `main`. Automated publishing and deployment remain planned.
+**GitHub Actions CI/CD** runs Python tests first. Pull requests to `main` then
+verify the Docker build without deploying. Pushes to `main` build an image tagged
+with the commit SHA, authenticate to Azure through OIDC, push to `ticketrouteacr`,
+and update `ca-ticketroute` in `rg-ticketroute` to use that image. Only the image
+is updated; existing environment variables, secrets, identities, and ingress remain.
+Authentication uses the repository's `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and
+`AZURE_SUBSCRIPTION_ID` secrets with an Azure federated credential for `main`;
+no Azure client secret or AI API key is needed by the workflow.
 
 ## Technology stack
 

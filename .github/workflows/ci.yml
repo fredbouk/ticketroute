@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  test-and-build:
-    name: Test and build Docker image
+  test:
+    name: Run Python tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -34,5 +34,61 @@ jobs:
       - name: Run tests with mocked AI responses
         run: python -m pytest -q
 
+  build-pull-request:
+    name: Verify pull request Docker build
+    needs: test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
       - name: Build Docker image without publishing
         run: docker build --tag ticketroute:ci .
+
+  deploy:
+    name: Build and deploy to Azure
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    # Keep deployments from updating the same app simultaneously.
+    concurrency:
+      group: ticketroute-production
+      cancel-in-progress: false
+    env:
+      IMAGE: ticketrouteacr.azurecr.io/ticketroute:${{ github.sha }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build Docker image with commit SHA tag
+        run: docker build --tag "$IMAGE" .
+
+      - name: Authenticate to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Authenticate Docker to Azure Container Registry
+        run: az acr login --name ticketrouteacr
+
+      - name: Push Docker image to Azure Container Registry
+        run: docker push "$IMAGE"
+
+      - name: Update Container App image
+        # Update only the image; preserve existing app configuration and secrets.
+        run: |
+          az containerapp update \
+            --resource-group rg-ticketroute \
+            --name ca-ticketroute \
+            --image "$IMAGE" \
+            --output none
