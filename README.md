@@ -23,18 +23,17 @@ By reducing time spent identifying the responsible team and minimizing unnecessa
 
 ## How it works
 
-1. **Describe the incident.** Copy the short description and/or description from
-   ServiceNow.
-2. **Search historical evidence.** A local embedding model represents incident text
-   as numerical vectors. Semantic search uses these vectors to retrieve up to five
-   similar resolved incidents, even when their wording differs.
-3. **Assess team ownership.** The new incident and retrieved evidence are sent as
-   text to **GPT-4.1 mini**. This RAG pipeline produces a proposed assignment group
-   and an explanation based on the supplied incident context.
-4. **Validate the response.** Python checks the response structure and ensures any
-   recommended group appears in the retrieved evidence.
-5. **Review the guidance.** Technicians inspect the recommendation and historical
-   evidence. Insufficient evidence can produce a manual-review outcome.
+1. **Describe the incident.** Copy the text from the Short description and Description
+   fields in ServiceNow, or enter an incident manually.
+2. **Find similar incidents.** TicketRoute uses semantic search to find up to five
+   similar resolved incidents, even when they are described using different words.
+3. **Recommend a support team.** GPT-4.1 mini analyzes the new incident alongside
+   historical evidence and recommends an assignment group with an explanation.
+4. **Validate the recommendation.** Python checks that the AI response is valid and
+   that the recommended group is supported by the retrieved incidents.
+5. **Review the result.** Technicians receive a recommended assignment group and can
+   inspect similar historical incidents before routing the ticket. If the evidence
+   is insufficient, TicketRoute can recommend manual review.
 
 If AI is unavailable or a response fails validation, local routing uses the search
 results to recommend a team, suggest candidates, or request manual review.
@@ -66,30 +65,32 @@ the image, and **Microsoft Foundry** handles AI requests.
 
 ```mermaid
 flowchart LR
-    G[GitHub repository] -->|Workflow trigger| C[GitHub Actions]
-    C -->|Push to main: OIDC authentication| E[Microsoft Entra ID]
-    C -->|Push to main: publish image| R[Azure Container Registry]
-    C -->|Push to main: update image| A["Azure Container Apps: Streamlit"]
-    C -->|Pull request| P[CI checks only]
+    G[GitHub repository] -->|Push to main| C[GitHub Actions]
+    C --> T[Automated Python tests]
+    T -->|On success| B[Build Docker image]
+    B -->|Publish image| R[Azure Container Registry]
+    R -->|Deploy image via GitHub Actions| A[Azure Container Apps]
+    C -->|OIDC authentication| E[Microsoft Entra ID]
     A -.->|Managed identity image pull| R
-    U[Visitor] -.->|HTTPS| A
-    A -.->|AI requests| F["Microsoft Foundry: GPT-4.1 mini"]
+    A -.->|Runtime AI requests| F["Microsoft Foundry: GPT-4.1 mini"]
 ```
 
-Solid arrows show deployment and authentication; dotted arrows show runtime requests.
-Pushes to `main` run tests, build and publish the Docker image, then deploy it.
-Pull requests run tests and verify the build without deploying. Existing app settings are preserved.
+Every push to `main` triggers GitHub Actions to run the tests, build a Docker image,
+publish it to Azure Container Registry, and deploy the updated image to Azure Container Apps.
 
 ## Engineering decisions
 
-- **Local retrieval:** embeddings and CSV-based search keep the evidence pipeline
-  simple, without a separate vector database.
-- **Grounded AI guidance:** retrieved incidents supply context; Python validates
-  permitted group names.
-- **Resilient routing:** deterministic local rules provide a fallback, while manual
-  review keeps uncertain cases with technicians.
-- **Repeatable delivery:** Docker bundles the model and application. OIDC authenticates
-  deployments; managed identity handles ACR pulls. Foundry requests currently use an API key.
+- **Local search:** historical incidents stay in a CSV file and are searched locally,
+  without a separate search database.
+- **Grounded AI guidance:** similar incidents provide evidence; Python checks that
+  the recommended team appears in that evidence.
+- **Resilient routing:** If the AI service is unavailable, TicketRoute can still
+  recommend a support team based on similar historical incidents. Uncertain cases
+  are flagged for manual review.
+- **Repeatable delivery:** Docker bundles the model and application. GitHub Actions
+  authenticates to Azure through Microsoft Entra ID using OIDC, without a stored
+  Azure login password. Azure Container Apps uses managed identity to pull images
+  from Azure Container Registry.
 
 ## Technology stack
 
@@ -98,11 +99,27 @@ OpenAI Python SDK, pytest, Docker, and Azure. Search uses local CSV data.
 
 ## Run locally
 
-From the repository root, using Python 3.12 and Windows PowerShell:
+Python 3.12 is required. From the repository root, create a virtual environment:
+
+```sh
+python -m venv .venv
+```
+
+Activate it in Windows PowerShell:
 
 ```powershell
-python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+```
+
+Or on macOS/Linux:
+
+```sh
+source .venv/bin/activate
+```
+
+Install dependencies and start the app:
+
+```sh
 python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
@@ -112,7 +129,7 @@ No Azure credentials are needed for local routing.
 
 To enable RAG, set `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, and
 `AZURE_OPENAI_DEPLOYMENT` in the environment before starting the app. The deployment
-must host GPT-4.1 mini. Keep credentials out of source control.
+must host GPT-4.1 mini.
 
 ## Run with Docker
 
@@ -126,9 +143,9 @@ docker run --rm -p 8501:8501 ticketroute:local
 Open `http://localhost:8501`. Building requires internet access; the bundled embedding
 model runs locally. For RAG, forward the Azure variables with Docker's `--env` flags.
 
-## Evaluation and roadmap
+## Evaluation and next steps
 
-TicketRoute includes a set of synthetic test incidents to evaluate how well it identifies the right support team and when it should recommend manual review.
+TicketRoute uses 120 synthetic historical incidents to support its recommendations and 30 additional test incidents to evaluate how accurately its local routing assigns tickets.
 
 The next step would be to evaluate it using anonymized historical ServiceNow incident data.
 

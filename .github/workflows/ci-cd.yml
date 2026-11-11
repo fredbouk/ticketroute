@@ -3,8 +3,6 @@ name: CI/CD
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -34,24 +32,9 @@ jobs:
       - name: Run tests with mocked AI responses
         run: python -m pytest -q
 
-  build-pull-request:
-    name: Verify pull request Docker build
-    needs: test
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Build Docker image without publishing
-        run: docker build --tag ticketroute:ci .
-
   deploy:
     name: Build and deploy to Azure
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
